@@ -8,7 +8,7 @@ import time
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Quiz: Entre no Jogo!", layout="wide")
+st.set_page_config(page_title="Quiz Técnico WLI", layout="wide")
 
 # --- 2. CONEXÃO SUPABASE ---
 url = st.secrets["URL_SUPABASE"]
@@ -94,7 +94,7 @@ if 'show_players_list' not in st.session_state:
     st.session_state.show_players_list = False
 
 if not st.session_state.auth['logged']:
-    st.title("🔑 Quiz Técnico WLI")
+    st.title("🔑 Quiz: Entre no Jogo!")
     u_nome = st.text_input("Apelido")
     u_pass = st.text_input("Senha", type="password")
     
