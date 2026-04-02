@@ -7,38 +7,33 @@ import string
 import time
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Quiz WLI", layout="wide")
+# --- 1. CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="Quiz Técnico WLI", layout="wide")
 
 # --- 2. CONEXÃO SUPABASE ---
 url = st.secrets["URL_SUPABASE"]
 key = st.secrets["KEY_SUPABASE"]
 supabase = create_client(url, key)
 
-# Refresh de 2s para sincronizar os usuários com as ações do Admin
+# Refresh de 2s para sincronizar os usuários com o banco de dados
 st_autorefresh(interval=2000, key="refresh_sincronizado")
 
-# --- 3. FUNÇÃO DE LEITURA DO WORD (SIMPLIFICADA AO MÁXIMO) ---
+# --- 3. FUNÇÕES DE SUPORTE ---
 def parse_word_file(file):
     documento = Document(file)
     texto_extraido = []
-    
     for paragrafo in documento.paragraphs:
         conteudo = paragrafo.text.strip()
         if conteudo != "":
             texto_extraido.append(conteudo)
     
     lista_final = []
-    # Pega Pares: i = Pergunta, i+1 = Resposta
     for i in range(0, len(texto_extraido), 2):
         if (i + 1) < len(texto_extraido):
-            pergunta_txt = texto_extraido[i]
-            resposta_txt = texto_extraido[i+1]
-            bloco = {
-                "question_text_quiz": pergunta_txt,
-                "answer_text_quiz": resposta_txt
-            }
-            lista_final.append(bloco)
+            lista_final.append({
+                "question_text_quiz": texto_extraido[i],
+                "answer_text_quiz": texto_extraido[i+1]
+            })
     return lista_final
 
 # --- 4. ESTILIZAÇÃO CSS ---
@@ -51,20 +46,20 @@ st.markdown("""
         text-align: center;
         font-size: 32px;
         font-weight: bold;
-        color: #002060; /* Azul Escuro */
+        color: #002060;
         border-radius: 15px;
         margin-bottom: 20px;
     }
-    .alerta-mao {
-        background-color: #C00000;
+    .contador-jogadores {
+        background-color: #4472C4;
         color: white;
-        padding: 25px;
+        padding: 10px;
         text-align: center;
-        font-size: 40px;
+        border-radius: 8px;
         font-weight: bold;
-        border: 5px solid #000;
-        border-radius: 20px;
-        margin-top: 20px;
+        font-size: 18px;
+        margin-top: 10px;
+        border: 1px solid #000;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -72,6 +67,8 @@ st.markdown("""
 # --- 5. LÓGICA DE LOGIN ---
 if 'auth' not in st.session_state:
     st.session_state.auth = {'logged': False, 'role': None}
+if 'show_players_list' not in st.session_state:
+    st.session_state.show_players_list = False
 
 if not st.session_state.auth['logged']:
     st.title("🔑 Quiz Técnico WLI")
@@ -94,10 +91,11 @@ if not st.session_state.auth['logged']:
 
 # --- 6. PAINEL ADMIN ---
 elif st.session_state.auth['role'] == 'admin':
-    st.sidebar.title("ADMINISTRAÇÃO")
+    st.sidebar.title("🛠️ ADMINISTRAÇÃO")
     state = supabase.table("game_state_quiz").select("*").eq("id_quiz", 1).single().execute().data
     st.sidebar.info(f"SENHA JOGADORES: {state['master_password_quiz']}")
     
+    # Upload Word
     f_word = st.sidebar.file_uploader("Arquivo Word", type="docx")
     if f_word and st.sidebar.button("Carregar Questões"):
         dados_word = parse_word_file(f_word)
@@ -106,6 +104,34 @@ elif st.session_state.auth['role'] == 'admin':
         st.sidebar.success("OK!")
 
     st.sidebar.divider()
+    
+    # --- SEÇÃO DE JOGADORES ---
+    st.sidebar.subheader("👥 Gestão de Jogadores")
+    
+    # Busca lista de jogadores no Supabase
+    res_players = supabase.table("players_quiz").select("*").execute()
+    players_data = res_players.data
+    qtd_jogadores = len(players_data)
+
+    # Botão para alternar exibição da lista
+    if st.sidebar.button("📋 JOGADORES"):
+        st.session_state.show_players_list = not st.session_state.show_players_list
+
+    # Exibe a lista se o botão foi clicado
+    if st.session_state.show_players_list:
+        for p in players_data:
+            col_p1, col_p2 = st.sidebar.columns([3, 1])
+            col_p1.text(f"👤 {p['nickname_quiz']}")
+            if col_p2.button("❌", key=f"del_{p['id_quiz']}"):
+                supabase.table("players_quiz").delete().eq("id_quiz", p['id_quiz']).execute()
+                st.rerun()
+
+    # Caixa com a quantidade de jogadores (Sempre visível)
+    st.sidebar.markdown(f'<div class="contador-jogadores">JOGADORES CONECTADOS: {qtd_jogadores}</div>', unsafe_allow_html=True)
+    
+    st.sidebar.divider()
+
+    # Navegação de Perguntas
     idx = state['current_question_index_quiz']
     col1, col2 = st.sidebar.columns(2)
     with col1:
@@ -127,7 +153,7 @@ elif st.session_state.auth['role'] == 'admin':
     if st.sidebar.button("✅ VER RESPOSTA", use_container_width=True):
         supabase.table("game_state_quiz").update({"show_answer_quiz": True, "is_active_quiz": False}).eq("id_quiz", 1).execute()
 
-# --- 7. TELA DO JOGO ---
+# --- 7. TELA DO JOGO (VISUALIZAÇÃO) ---
 if st.session_state.auth['logged']:
     st.markdown('<h2 style="text-align:center;">QUIZ VISITA TÉCNICA - WLI</h2>', unsafe_allow_html=True)
     
@@ -138,41 +164,26 @@ if st.session_state.auth['logged']:
         item = q_res[g_res['current_question_index_quiz']]
         st.markdown(f'<div class="caixa-pergunta">{item["question_text_quiz"]}</div>', unsafe_allow_html=True)
         
-        # --- CRONÔMETRO COM HTML COMPONENT (RESOLVE O PROBLEMA DO JS) ---
         if g_res['is_active_quiz']:
             dur = g_res['timer_duration_quiz']
             ini = g_res['start_time_quiz']
             
             timer_html = f"""
-            <div id="timer-ui" style="
-                background-color: #595959; color: white; padding: 15px; 
-                font-size: 60px; text-align: center; font-family: sans-serif;
-                font-weight: bold; width: 180px; margin: 0 auto; border-radius: 10px;
-                border: 2px solid #000;">--</div>
+            <div id="timer-ui" style="background-color:#595959; color:white; padding:15px; font-size:60px; text-align:center; font-family:sans-serif; font-weight:bold; width:180px; margin:0 auto; border-radius:10px; border:2px solid #000;">--</div>
             <div id="mao-ui"></div>
-
             <script>
-                var duracao = {dur};
-                var inicio = {ini};
-                var display = document.getElementById('timer-ui');
-                var mao = document.getElementById('mao-ui');
-
-                function atualizar() {{
-                    var agora = Math.floor(Date.now() / 1000);
-                    var resto = duracao - (agora - inicio);
-
-                    if (resto > 0) {{
-                        display.innerHTML = resto;
-                        mao.innerHTML = "";
-                    }} else {{
-                        display.innerHTML = "0";
-                        display.style.backgroundColor = "#C00000";
-                        mao.innerHTML = '<div style="background-color: #C00000; color: white; padding: 25px; text-align: center; font-size: 35px; font-weight: bold; border: 5px solid #000; border-radius: 20px; margin-top: 20px; font-family: sans-serif;">✋ LEVANTE A MÃO E RESPONDA!</div>';
+                var duracao = {dur}; var inicio = {ini};
+                var disp = document.getElementById('timer-ui'); var mao = document.getElementById('mao-ui');
+                function upd() {{
+                    var agora = Math.floor(Date.now() / 1000); var resto = duracao - (agora - inicio);
+                    if (resto > 0) {{ disp.innerHTML = resto; mao.innerHTML = ""; }}
+                    else {{
+                        disp.innerHTML = "0"; disp.style.backgroundColor = "#C00000";
+                        mao.innerHTML = '<div style="background-color:#C00000; color:white; padding:25px; text-align:center; font-size:35px; font-weight:bold; border:5px solid #000; border-radius:20px; margin-top:20px; font-family:sans-serif;">✋ LEVANTE A MÃO E RESPONDA!</div>';
                         clearInterval(loop);
                     }}
                 }}
-                var loop = setInterval(atualizar, 1000);
-                atualizar();
+                var loop = setInterval(upd, 1000); upd();
             </script>
             """
             components.html(timer_html, height=250)
