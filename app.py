@@ -8,7 +8,7 @@ import time
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Quiz Técnico WLI", layout="wide")
+st.set_page_config(page_title="Quiz: Entre no Jogo!", layout="wide")
 
 # --- 2. CONEXÃO SUPABASE ---
 url = st.secrets["URL_SUPABASE"]
