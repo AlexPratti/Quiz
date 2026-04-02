@@ -16,9 +16,9 @@ key = st.secrets["KEY_SUPABASE"]
 supabase = create_client(url, key)
 
 # Refresh de 2s para sincronização constante entre Admin e Jogadores
-st_autorefresh(interval=2000, key="sync_final_wli")
+st_autorefresh(interval=2000, key="sync_final_original_wli")
 
-# --- 3. FUNÇÃO DE LEITURA DO WORD (COM LÓGICA DE EMBARALHAMENTO) ---
+# --- 3. FUNÇÃO DE LEITURA DO WORD (MANTIDA ORIGINAL) ---
 def parse_word_file(file):
     documento = Document(file)
     texto_extraido = []
@@ -27,20 +27,13 @@ def parse_word_file(file):
         if conteudo != "":
             texto_extraido.append(conteudo)
     
-    total_perguntas = len(texto_extraido) // 2
-    indices_aleatorios = list(range(total_perguntas))
-    random.shuffle(indices_aleatorios) # Gera a ordem aleatória sem repetição
-    
     lista_final = []
-    count = 0
     for i in range(0, len(texto_extraido), 2):
         if (i + 1) < len(texto_extraido):
             lista_final.append({
                 "question_text_quiz": texto_extraido[i],
-                "answer_text_quiz": texto_extraido[i+1],
-                "random_order_quiz": indices_aleatorios[count]
+                "answer_text_quiz": texto_extraido[i+1]
             })
-            count += 1
     return lista_final
 
 # --- 4. ESTILIZAÇÃO CSS (MANTIDA ORIGINALIDADE E ALTA VISIBILIDADE) ---
@@ -99,6 +92,8 @@ if 'auth' not in st.session_state:
     st.session_state.auth = {'logged': False, 'role': None, 'id': None}
 if 'show_players_list' not in st.session_state:
     st.session_state.show_players_list = False
+if 'pool_questoes' not in st.session_state:
+    st.session_state.pool_questoes = []
 
 if not st.session_state.auth['logged']:
     st.title("🔑 Quiz Técnico WLI")
@@ -148,12 +143,15 @@ else:
         st.sidebar.info(f"SENHA JOGADORES: {state['master_password_quiz']}")
         
         f_word = st.sidebar.file_uploader("Arquivo Word", type="docx")
-        if f_word and st.sidebar.button("📤 CARREGAR E EMBARALHAR"):
+        if f_word and st.sidebar.button("📤 CARREGAR QUESTÕES"):
             dados_word = parse_word_file(f_word)
             supabase.table("questions_quiz").delete().neq("id_quiz", 0).execute()
-            supabase.table("questions_quiz").insert(dados_word).execute()
-            supabase.table("game_state_quiz").update({"current_question_index_quiz": 0, "is_active_quiz": False, "show_answer_quiz": False}).eq("id_quiz", 1).execute()
-            st.sidebar.success("Questões Sorteadas!")
+            res_db = supabase.table("questions_quiz").insert(dados_word).execute()
+            # Inicializa o pool de sorteio com os IDs do banco
+            st.session_state.pool_questoes = [q['id_quiz'] for q in res_db.data]
+            # Reseta estado do jogo: -1 indica início
+            supabase.table("game_state_quiz").update({"current_question_index_quiz": -1, "is_active_quiz": False, "show_answer_quiz": False}).eq("id_quiz", 1).execute()
+            st.sidebar.success(f"{len(dados_word)} questões carregadas!")
             st.rerun()
 
         st.sidebar.divider()
@@ -166,7 +164,7 @@ else:
 
         if st.session_state.show_players_list:
             for p in players_data:
-                col_p1, col_p2 = st.sidebar.columns([3,1])
+                col_p1, col_p2 = st.sidebar.columns()
                 col_p1.text(f"👤 {p['nickname_quiz']}")
                 if col_p2.button("❌", key=f"del_{p['id_quiz']}"):
                     supabase.table("players_quiz").delete().eq("id_quiz", p['id_quiz']).execute()
@@ -175,33 +173,28 @@ else:
         st.sidebar.markdown(f'<div class="contador-jogadores">JOGADORES ON-LINE: {len(players_data)}</div>', unsafe_allow_html=True)
         st.sidebar.divider()
 
-        # NAVEGAÇÃO COM CRONÔMETRO AUTOMÁTICO
-        idx = state['current_question_index_quiz']
+        # NAVEGAÇÃO: BOTÃO PRÓXIMA COM SORTEIO ALEATÓRIO E CRONÔMETRO AUTOMÁTICO
         t_padrao = st.sidebar.number_input("Tempo de Prova", value=15)
         
-        col_nav1, col_nav2 = st.sidebar.columns(2)
-        with col_nav1:
-            if st.button("⬅️ Anterior"):
+        if st.sidebar.button("🎲 PRÓXIMA PERGUNTA ALEATÓRIA", use_container_width=True):
+            if st.session_state.pool_questoes:
+                # Sorteia ID, remove do pool e atualiza o banco
+                id_sorteado = random.choice(st.session_state.pool_questoes)
+                st.session_state.pool_questoes.remove(id_sorteado)
+                
                 supabase.table("game_state_quiz").update({
-                    "current_question_index_quiz": max(0, idx-1),
+                    "current_question_index_quiz": id_sorteado,
                     "is_active_quiz": True,
                     "show_answer_quiz": False,
                     "timer_duration_quiz": t_padrao,
                     "start_time_quiz": int(time.time())
                 }).eq("id_quiz", 1).execute()
-                st.rerun()
-        with col_nav2:
-            if st.button("Próxima ➡️"):
-                supabase.table("game_state_quiz").update({
-                    "current_question_index_quiz": idx + 1,
-                    "is_active_quiz": True,
-                    "show_answer_quiz": False,
-                    "timer_duration_quiz": t_padrao,
-                    "start_time_quiz": int(time.time())
-                }).eq("id_quiz", 1).execute()
-                st.rerun()
+            else:
+                # Código -2 indica que o quiz acabou
+                supabase.table("game_state_quiz").update({"current_question_index_quiz": -2}).eq("id_quiz", 1).execute()
+            st.rerun()
 
-        # RESET: Interrompe a exibição do cronômetro
+        # RESET: Interrompe a exibição do cronômetro da tela
         if st.sidebar.button("🔄 RESET CRONÔMETRO", use_container_width=True):
             supabase.table("game_state_quiz").update({"is_active_quiz": False, "show_answer_quiz": False}).eq("id_quiz", 1).execute()
             st.rerun()
@@ -211,38 +204,42 @@ else:
             st.rerun()
 
     # --- 7. TELA DO JOGO (COM CRONÔMETRO MATEMÁTICO JS) ---
-    st.markdown('<h1 style="text-align:center;">QUIZ VISITA TÉCNICA - WLI</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 style="text-align:center; color:#333;">QUIZ VISITA TÉCNICA - WLI</h1>', unsafe_allow_html=True)
     
     g_res = supabase.table("game_state_quiz").select("*").eq("id_quiz", 1).single().execute().data
-    # Busca na ordem aleatória definida no upload
-    q_res = supabase.table("questions_quiz").select("*").order("random_order_quiz").execute().data
     
-    if q_res and g_res['current_question_index_quiz'] < len(q_res):
-        item = q_res[g_res['current_question_index_quiz']]
-        st.markdown(f'<div class="caixa-pergunta">{item["question_text_quiz"]}</div>', unsafe_allow_html=True)
+    if g_res['current_question_index_quiz'] == -2:
+        st.balloons()
+        st.success("🎉 TODAS AS PERGUNTAS FORAM RESPONDIDAS!")
+    elif g_res['current_question_index_quiz'] != -1:
+        # Busca a pergunta sorteada pelo ID específico
+        q_data = supabase.table("questions_quiz").select("*").eq("id_quiz", g_res['current_question_index_quiz']).single().execute().data
         
-        if g_res['is_active_quiz']:
-            timer_html = f"""
-            <div id="t-ui" style="background:#595959; color:white; padding:15px; font-size:60px; text-align:center; font-family:sans-serif; font-weight:bold; width:180px; margin:0 auto; border-radius:10px; border:2px solid #000;">--</div>
-            <div id="m-ui"></div>
-            <script>
-                var dur = {g_res['timer_duration_quiz']}; var ini = {g_res['start_time_quiz']};
-                var d_el = document.getElementById('t-ui'); var m_el = document.getElementById('m-ui');
-                function tick() {{
-                    var agora = Math.floor(Date.now() / 1000); var resto = dur - (agora - ini);
-                    if (resto > 0) {{ d_el.innerHTML = resto; m_el.innerHTML = ""; }}
-                    else {{
-                        d_el.innerHTML = "0"; d_el.style.background = "#C00000";
-                        m_el.innerHTML = '<div style="background:#C00000; color:white; padding:25px; text-align:center; font-size:35px; font-weight:bold; border:5px solid #000; border-radius:20px; margin-top:20px; font-family:sans-serif;">✋ LEVANTE A MÃO E RESPONDA!</div>';
-                        clearInterval(loop);
+        if q_data:
+            st.markdown(f'<div class="caixa-pergunta">{q_data["question_text_quiz"]}</div>', unsafe_allow_html=True)
+            
+            if g_res['is_active_quiz']:
+                timer_html = f"""
+                <div id="t-ui" style="background:#595959; color:white; padding:15px; font-size:60px; text-align:center; font-family:sans-serif; font-weight:bold; width:180px; margin:0 auto; border-radius:10px; border:2px solid #000;">--</div>
+                <div id="m-ui"></div>
+                <script>
+                    var dur = {g_res['timer_duration_quiz']}; var ini = {g_res['start_time_quiz']};
+                    var d_el = document.getElementById('t-ui'); var m_el = document.getElementById('m-ui');
+                    function tick() {{
+                        var agora = Math.floor(Date.now() / 1000); var resto = dur - (agora - ini);
+                        if (resto > 0) {{ d_el.innerHTML = resto; m_el.innerHTML = ""; }}
+                        else {{
+                            d_el.innerHTML = "0"; d_el.style.background = "#C00000";
+                            m_el.innerHTML = '<div style="background:#C00000; color:white; padding:25px; text-align:center; font-size:35px; font-weight:bold; border:5px solid #000; border-radius:20px; margin-top:20px; font-family:sans-serif;">✋ LEVANTE A MÃO E RESPONDA!</div>';
+                            clearInterval(loop);
+                        }}
                     }}
-                }}
-                var loop = setInterval(tick, 1000); tick();
-            </script>
-            """
-            components.html(timer_html, height=250)
-        
-        if g_res['show_answer_quiz']:
-            st.success(f"**RESPOSTA:** {item['answer_text_quiz']}")
+                    var loop = setInterval(tick, 1000); tick();
+                </script>
+                """
+                components.html(timer_html, height=250)
+            
+            if g_res['show_answer_quiz']:
+                st.success(f"**RESPOSTA:** {q_data['answer_text_quiz']}")
     else:
-        st.info("Aguardando ação do administrador...")
+        st.info("Aguardando o Administrador iniciar o Quiz.")
