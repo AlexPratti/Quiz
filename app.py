@@ -16,7 +16,7 @@ key = st.secrets["KEY_SUPABASE"]
 supabase = create_client(url, key)
 
 # Refresh de 2s para sincronização constante entre Admin e Jogadores
-st_autorefresh(interval=2000, key="sync_final_original_wli")
+st_autorefresh(interval=2000, key="sync_original_v9_final")
 
 # --- 3. FUNÇÃO DE LEITURA DO WORD (MANTIDA ORIGINAL) ---
 def parse_word_file(file):
@@ -110,9 +110,13 @@ if not st.session_state.auth['logged']:
         else:
             res = supabase.table("game_state_quiz").select("master_password_quiz").eq("id_quiz", 1).single().execute()
             if u_pass == res.data['master_password_quiz']:
-                p_ins = supabase.table("players_quiz").insert({"nickname_quiz": u_nome}).execute()
-                st.session_state.auth = {'logged': True, 'role': 'player', 'id': p_ins.data['id_quiz']}
-                st.rerun()
+                # CORREÇÃO: Captura do ID sem causar APIError de sintaxe
+                p_exec = supabase.table("players_quiz").insert({"nickname_quiz": u_nome}).execute()
+                if p_exec.data:
+                    # O Supabase retorna uma lista, pegamos o primeiro item [0]
+                    p_id_data = p_exec.data[0]['id_quiz']
+                    st.session_state.auth = {'logged': True, 'role': 'player', 'id': p_id_data}
+                    st.rerun()
             else:
                 st.error("Senha incorreta!")
 
@@ -147,9 +151,8 @@ else:
             dados_word = parse_word_file(f_word)
             supabase.table("questions_quiz").delete().neq("id_quiz", 0).execute()
             res_db = supabase.table("questions_quiz").insert(dados_word).execute()
-            # Inicializa o pool de sorteio com os IDs do banco
+            # Alimenta o pool para sorteio aleatório
             st.session_state.pool_questoes = [q['id_quiz'] for q in res_db.data]
-            # Reseta estado do jogo: -1 indica início
             supabase.table("game_state_quiz").update({"current_question_index_quiz": -1, "is_active_quiz": False, "show_answer_quiz": False}).eq("id_quiz", 1).execute()
             st.sidebar.success(f"{len(dados_word)} questões carregadas!")
             st.rerun()
@@ -173,12 +176,11 @@ else:
         st.sidebar.markdown(f'<div class="contador-jogadores">JOGADORES ON-LINE: {len(players_data)}</div>', unsafe_allow_html=True)
         st.sidebar.divider()
 
-        # NAVEGAÇÃO: BOTÃO PRÓXIMA COM SORTEIO ALEATÓRIO E CRONÔMETRO AUTOMÁTICO
+        # NAVEGAÇÃO: BOTÃO PRÓXIMA ALEATÓRIA (CRONÔMETRO AUTOMÁTICO)
         t_padrao = st.sidebar.number_input("Tempo de Prova", value=15)
         
         if st.sidebar.button("🎲 PRÓXIMA PERGUNTA ALEATÓRIA", use_container_width=True):
             if st.session_state.pool_questoes:
-                # Sorteia ID, remove do pool e atualiza o banco
                 id_sorteado = random.choice(st.session_state.pool_questoes)
                 st.session_state.pool_questoes.remove(id_sorteado)
                 
@@ -190,11 +192,10 @@ else:
                     "start_time_quiz": int(time.time())
                 }).eq("id_quiz", 1).execute()
             else:
-                # Código -2 indica que o quiz acabou
                 supabase.table("game_state_quiz").update({"current_question_index_quiz": -2}).eq("id_quiz", 1).execute()
             st.rerun()
 
-        # RESET: Interrompe a exibição do cronômetro da tela
+        # RESET: Interrompe o cronômetro da tela
         if st.sidebar.button("🔄 RESET CRONÔMETRO", use_container_width=True):
             supabase.table("game_state_quiz").update({"is_active_quiz": False, "show_answer_quiz": False}).eq("id_quiz", 1).execute()
             st.rerun()
@@ -212,15 +213,16 @@ else:
         st.balloons()
         st.success("🎉 TODAS AS PERGUNTAS FORAM RESPONDIDAS!")
     elif g_res['current_question_index_quiz'] != -1:
-        # Busca a pergunta sorteada pelo ID específico
-        q_data = supabase.table("questions_quiz").select("*").eq("id_quiz", g_res['current_question_index_quiz']).single().execute().data
+        # CORREÇÃO: Busca sem .single() para evitar travar se o ID não existir no momento
+        res_q_db = supabase.table("questions_quiz").select("*").eq("id_quiz", g_res['current_question_index_quiz']).execute()
         
-        if q_data:
+        if res_q_db.data:
+            q_data = res_q_db.data[0]
             st.markdown(f'<div class="caixa-pergunta">{q_data["question_text_quiz"]}</div>', unsafe_allow_html=True)
             
             if g_res['is_active_quiz']:
                 timer_html = f"""
-                <div id="t-ui" style="background:#595959; color:white; padding:15px; font-size:60px; text-align:center; font-family:sans-serif; font-weight:bold; width:180px; margin:0 auto; border-radius:10px; border:2px solid #000;">--</div>
+                <div id="t-ui" class="display-cronometro" style="background:#595959; color:white; padding:15px; font-size:60px; text-align:center; font-family:sans-serif; font-weight:bold; width:180px; margin:0 auto; border-radius:10px; border:2px solid #000;">--</div>
                 <div id="m-ui"></div>
                 <script>
                     var dur = {g_res['timer_duration_quiz']}; var ini = {g_res['start_time_quiz']};
@@ -230,7 +232,7 @@ else:
                         if (resto > 0) {{ d_el.innerHTML = resto; m_el.innerHTML = ""; }}
                         else {{
                             d_el.innerHTML = "0"; d_el.style.background = "#C00000";
-                            m_el.innerHTML = '<div style="background:#C00000; color:white; padding:25px; text-align:center; font-size:35px; font-weight:bold; border:5px solid #000; border-radius:20px; margin-top:20px; font-family:sans-serif;">✋ LEVANTE A MÃO E RESPONDA!</div>';
+                            m_el.innerHTML = '<div class="alerta-mao" style="background-color:#C00000; color:white; padding:25px; text-align:center; font-size:35px; font-weight:bold; border:5px solid #000; border-radius:20px; margin-top:20px; font-family:sans-serif;">✋ LEVANTE A MÃO E RESPONDA!</div>';
                             clearInterval(loop);
                         }}
                     }}
@@ -240,6 +242,11 @@ else:
                 components.html(timer_html, height=250)
             
             if g_res['show_answer_quiz']:
-                st.success(f"**RESPOSTA:** {q_data['answer_text_quiz']}")
+                st.markdown(f"""
+                    <div style="background-color: #D4EDDA; padding: 25px; border-radius: 10px; border: 2px solid #28A745; font-size: 28px; font-weight: bold; text-align: center; color: #155724; font-family: sans-serif;">
+                        RESPOSTA: {q_data['answer_text_quiz']}
+                    </div>
+                """, unsafe_allow_html=True)
     else:
         st.info("Aguardando o Administrador iniciar o Quiz.")
+
