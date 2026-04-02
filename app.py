@@ -6,162 +6,160 @@ import string
 import time
 from streamlit_autorefresh import st_autorefresh
 
-# 1. Configurações Iniciais e Conexão
-st.set_page_config(page_title="Quiz WLI", layout="wide")
-supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+# --- 1. CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="Quiz Técnico WLI", layout="wide")
 
-# Atualiza o app a cada 2 segundos para sincronizar Admin e Jogadores
-st_autorefresh(interval=2000, key="quiz_sync")
+# --- 2. CONEXÃO COM O SUPABASE ---
+# Certifique-se de que os nomes no secrets.toml estão exatamente assim
+url = st.secrets["SUPABASE_URL"]
+key = st.secrets["SUPABASE_KEY"]
+supabase = create_client(url, key)
 
-# 2. Funções de Suporte
+# Atualiza a tela automaticamente para sincronizar admin e jogadores
+st_autorefresh(interval=2000, key="frequencia_quiz")
+
+# --- 3. FUNÇÃO PARA LER O WORD (DIVIDIDA PARA EVITAR ERROS) ---
 def parse_word_file(file):
     doc = Document(file)
-    # Pega apenas os parágrafos que têm texto (ignora linhas vazias entre perguntas)
-    full_text =
+    full_text = []
+    
+    # Extrai o texto de cada parágrafo ignorando linhas vazias
+    for p in doc.paragraphs:
+        texto_limpo = p.text.strip()
+        if texto_limpo:
+            full_text.append(texto_limpo)
     
     qa_pairs = []
-    # Pula de 2 em 2: Linha 1=Pergunta, Linha 2=Resposta
+    # Organiza em pares: parágrafo i (questão) e i+1 (resposta)
     for i in range(0, len(full_text), 2):
         if i + 1 < len(full_text):
-            qa_pairs.append({
+            par = {
                 "question_text_quiz": full_text[i],
                 "answer_text_quiz": full_text[i+1]
-            })
+            }
+            qa_pairs.append(par)
     return qa_pairs
 
-# 3. Estilização CSS (Inspirada na sua imagem)
+# --- 4. ESTILO CSS (VISUAL DO EXCEL) ---
 st.markdown("""
     <style>
-    .main { background-color: #ffffff; }
-    .question-box {
+    .pergunta-box {
         background-color: #DDEBF7;
         padding: 30px;
         border: 2px solid #000;
         text-align: center;
         font-size: 24px;
         font-weight: bold;
-        color: #000;
-        margin-bottom: 20px;
-        border-radius: 5px;
+        border-radius: 8px;
     }
-    .timer-rect {
-        background-color: #BFBFBF;
+    .timer-display {
+        background-color: #7F7F7F;
         color: white;
-        padding: 10px 40px;
-        font-size: 40px;
+        padding: 15px;
+        font-size: 45px;
+        text-align: center;
         font-weight: bold;
-        display: inline-block;
-        border-radius: 5px;
+        width: 150px;
+        margin: 20px auto;
     }
-    .hand-box {
-        background-color: #FF0000;
+    .mao-alerta {
+        background-color: red;
         color: white;
         padding: 20px;
-        font-size: 38px;
-        font-weight: bold;
         text-align: center;
-        border-radius: 10px;
-        border: 3px solid #000;
-        margin-top: 20px;
+        font-size: 35px;
+        font-weight: bold;
+        border: 4px solid #000;
+        border-radius: 15px;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# 4. Lógica de Autenticação
+# --- 5. SISTEMA DE LOGIN ---
 if 'auth' not in st.session_state:
-    st.session_state.auth = {'logged': False, 'role': None, 'user': ""}
+    st.session_state.auth = {'logged': False, 'role': None}
 
 if not st.session_state.auth['logged']:
-    st.title("🛡️ Login - Quiz Técnico")
-    user_input = st.text_input("Seu Nome/Apelido")
-    pass_input = st.text_input("Senha", type="password")
+    st.title("Acesso ao Quiz")
+    user_name = st.text_input("Seu Nome/Apelido")
+    user_pass = st.text_input("Senha", type="password")
     
     if st.button("Entrar"):
-        # Login do Admin
-        if pass_input == st.secrets["ADMIN_PASSWORD"]:
-            new_master = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
-            supabase.table("game_state_quiz").update({"master_password_quiz": new_master}).eq("id_quiz", 1).execute()
-            st.session_state.auth = {'logged': True, 'role': 'admin', 'user': user_input}
+        # Verifica se é Admin
+        if user_pass == st.secrets["ADMIN_PASSWORD"]:
+            # Gera nova senha mestre dinamicamente
+            nova_senha = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
+            supabase.table("game_state_quiz").update({"master_password_quiz": nova_senha}).eq("id_quiz", 1).execute()
+            
+            st.session_state.auth = {'logged': True, 'role': 'admin'}
             st.rerun()
         else:
-            # Login do Jogador (Busca senha mestre no banco)
+            # Verifica senha para Jogador
             res = supabase.table("game_state_quiz").select("master_password_quiz").eq("id_quiz", 1).single().execute()
-            if pass_input == res.data['master_password_quiz']:
-                st.session_state.auth = {'logged': True, 'role': 'player', 'user': user_input}
-                supabase.table("players_quiz").insert({"nickname_quiz": user_input}).execute()
+            if user_pass == res.data['master_password_quiz']:
+                st.session_state.auth = {'logged': True, 'role': 'player'}
+                supabase.table("players_quiz").insert({"nickname_quiz": user_name}).execute()
                 st.rerun()
             else:
-                st.error("Senha incorreta ou Admin ainda não gerou acesso.")
+                st.error("Senha inválida ou o Admin ainda não iniciou a sessão.")
 
-# 5. Interface do Administrador
+# --- 6. PAINEL DO ADMINISTRADOR ---
 elif st.session_state.auth['role'] == 'admin':
-    st.sidebar.title("⚙️ Painel Admin")
-    state = supabase.table("game_state_quiz").select("*").eq("id_quiz", 1).single().execute().data
+    st.sidebar.title("🛠️ Painel Admin")
+    estado = supabase.table("game_state_quiz").select("*").eq("id_quiz", 1).single().execute().data
     
-    st.sidebar.success(f"SENHA PARA JOGADORES: {state['master_password_quiz']}")
+    st.sidebar.info(f"SENHA PARA JOGADORES: {estado['master_password_quiz']}")
     
-    # Upload do Arquivo Word
-    uploaded_docx = st.sidebar.file_uploader("Carregar Perguntas (.docx)", type="docx")
-    if uploaded_docx and st.sidebar.button("💾 Salvar Perguntas no Banco"):
-        qa_data = parse_word_file(uploaded_docx)
-        supabase.table("questions_quiz").delete().neq("id_quiz", 0).execute() # Limpa anteriores
-        supabase.table("questions_quiz").insert(qa_data).execute()
-        st.sidebar.info(f"{len(qa_data)} questões salvas!")
+    # Upload e Processamento
+    doc_file = st.sidebar.file_uploader("Arquivo Word das Questões", type="docx")
+    if doc_file and st.sidebar.button("Carregar Questões"):
+        dados_questoes = parse_word_file(doc_file)
+        supabase.table("questions_quiz").delete().neq("id_quiz", 0).execute()
+        supabase.table("questions_quiz").insert(dados_questoes).execute()
+        st.sidebar.success("Questões enviadas com sucesso!")
 
-    # Controles do Jogo
-    tempo_def = st.sidebar.number_input("Tempo (segundos)", value=15)
-    pergunta_idx = st.sidebar.number_input("Índice da Pergunta", value=0, min_value=0)
+    # Controles do Quiz
+    tempo = st.sidebar.number_input("Segundos", value=15)
+    idx = st.sidebar.number_input("Questão Atual (Índice)", value=0)
     
-    if st.sidebar.button("🚀 START (Iniciar Tempo)"):
+    if st.sidebar.button("🚀 INICIAR CRONÔMETRO"):
         supabase.table("game_state_quiz").update({
             "is_active_quiz": True,
-            "timer_duration_quiz": tempo_def,
-            "current_question_index_quiz": pergunta_idx,
+            "timer_duration_quiz": tempo,
+            "current_question_index_quiz": idx,
             "show_answer_quiz": False,
             "start_time_quiz": int(time.time())
         }).eq("id_quiz", 1).execute()
 
-    if st.sidebar.button("✅ REVELAR RESPOSTA"):
+    if st.sidebar.button("✅ MOSTRAR RESPOSTA"):
         supabase.table("game_state_quiz").update({"show_answer_quiz": True, "is_active_quiz": False}).eq("id_quiz", 1).execute()
 
-    # Gerenciar Jogadores
-    st.sidebar.divider()
-    st.sidebar.subheader("Jogadores Online")
-    players = supabase.table("players_quiz").select("*").execute().data
-    for p in players:
-        if st.sidebar.button(f"Remover {p['nickname_quiz']}"):
-            supabase.table("players_quiz").delete().eq("id_quiz", p['id_quiz']).execute()
-            st.rerun()
-
-# 6. Tela Principal do Jogo (Visível para Admin e Jogadores)
+# --- 7. TELA DO JOGO (SINCRONIZADA) ---
 if st.session_state.auth['logged']:
-    state = supabase.table("game_state_quiz").select("*").eq("id_quiz", 1).single().execute().data
-    questions = supabase.table("questions_quiz").select("*").order("id_quiz").execute().data
+    st.markdown('<h2 style="text-align:center;">TESTE DE CONHECIMENTO - FABRICAÇÃO WLI</h2>', unsafe_allow_html=True)
     
-    if questions and state['current_question_index_quiz'] < len(questions):
-        q_atual = questions[state['current_question_index_quiz']]
+    estado = supabase.table("game_state_quiz").select("*").eq("id_quiz", 1).single().execute().data
+    perguntas = supabase.table("questions_quiz").select("*").order("id_quiz").execute().data
+    
+    if perguntas and estado['current_question_index_quiz'] < len(perguntas):
+        p_atual = perguntas[estado['current_question_index_quiz']]
         
-        # Cabeçalho igual à imagem
-        st.markdown('<h2 style="text-align:center; color:#A52A2A;">TESTE DE CONHECIMENTO DO PROCESSO DE FABRICAÇÃO DA WLI</h2>', unsafe_allow_html=True)
+        # Caixa da Questão
+        st.markdown(f'<div class="pergunta-box">{p_atual["question_text_quiz"]}</div>', unsafe_allow_html=True)
         
-        # Caixa da Pergunta
-        st.markdown(f'<div class="question-box">{q_atual["question_text_quiz"]}</div>', unsafe_allow_html=True)
-        
-        # Lógica do Cronômetro
-        if state['is_active_quiz']:
-            tempo_passado = int(time.time()) - state['start_time_quiz']
-            tempo_restante = max(0, state['timer_duration_quiz'] - tempo_passado)
+        # Lógica do Timer
+        if estado['is_active_quiz']:
+            agora = int(time.time())
+            decorrido = agora - estado['start_time_quiz']
+            restante = max(0, estado['timer_duration_quiz'] - decorrido)
             
-            col_t1, col_t2, col_t3 = st.columns([1,1,1])
-            with col_t2:
-                st.markdown(f'<div class="timer-rect">{tempo_restante}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="timer-display">{restante}</div>', unsafe_allow_html=True)
             
-            # Se o tempo acabar, mostra a mão
-            if tempo_restante == 0:
-                st.markdown('<div class="hand-box">✋ LEVANTE A MÃO E RESPONDA!</div>', unsafe_allow_html=True)
+            if restante == 0:
+                st.markdown('<div class="mao-alerta">✋ LEVANTE A MÃO E RESPONDA!</div>', unsafe_allow_html=True)
         
-        # Mostrar Resposta
-        if state['show_answer_quiz']:
-            st.success(f"**RESPOSTA:** {q_atual['answer_text_quiz']}")
+        # Resposta
+        if estado['show_answer_quiz']:
+            st.success(f"**RESPOSTA:** {p_atual['answer_text_quiz']}")
     else:
-        st.warning("Aguardando o Admin iniciar ou carregar as perguntas.")
+        st.info("Aguardando o Administrador carregar perguntas ou iniciar o jogo.")
