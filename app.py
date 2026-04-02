@@ -8,7 +8,7 @@ import time
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA (MANTIDA ORIGINAL) ---
-st.set_page_config(page_title="Quiz de Conhecimentos", layout="wide")
+st.set_page_config(page_title="Quiz Técnico WLI", layout="wide")
 
 # --- 2. CONEXÃO SUPABASE (USANDO SEUS SECRETS) ---
 url = st.secrets["URL_SUPABASE"]
@@ -16,7 +16,7 @@ key = st.secrets["KEY_SUPABASE"]
 supabase = create_client(url, key)
 
 # Refresh de 2s para sincronização constante entre Admin e Jogadores
-st_autorefresh(interval=2000, key="sync_original_v9_final")
+st_autorefresh(interval=2000, key="sync_original_v10_final")
 
 # --- 3. FUNÇÃO DE LEITURA DO WORD (MANTIDA ORIGINAL) ---
 def parse_word_file(file):
@@ -96,7 +96,7 @@ if 'pool_questoes' not in st.session_state:
     st.session_state.pool_questoes = []
 
 if not st.session_state.auth['logged']:
-    st.title("🔑 Quiz: Entre e Jogue!")
+    st.title("🔑 Quiz Técnico WLI")
     u_nome = st.text_input("Apelido")
     u_pass = st.text_input("Senha", type="password")
     
@@ -110,12 +110,10 @@ if not st.session_state.auth['logged']:
         else:
             res = supabase.table("game_state_quiz").select("master_password_quiz").eq("id_quiz", 1).single().execute()
             if u_pass == res.data['master_password_quiz']:
-                # CORREÇÃO: Captura do ID sem causar APIError de sintaxe
                 p_exec = supabase.table("players_quiz").insert({"nickname_quiz": u_nome}).execute()
                 if p_exec.data:
-                    # O Supabase retorna uma lista, pegamos o primeiro item [0]
-                    p_id_data = p_exec.data[0]['id_quiz']
-                    st.session_state.auth = {'logged': True, 'role': 'player', 'id': p_id_data}
+                    # Captura o ID gerado pelo banco para o jogador logado
+                    st.session_state.auth = {'logged': True, 'role': 'player', 'id': p_exec.data[0]['id_quiz']}
                     st.rerun()
             else:
                 st.error("Senha incorreta!")
@@ -151,8 +149,9 @@ else:
             dados_word = parse_word_file(f_word)
             supabase.table("questions_quiz").delete().neq("id_quiz", 0).execute()
             res_db = supabase.table("questions_quiz").insert(dados_word).execute()
-            # Alimenta o pool para sorteio aleatório
+            # Inicializa o pool de sorteio aleatório
             st.session_state.pool_questoes = [q['id_quiz'] for q in res_db.data]
+            # Reseta estado: -1 indica aguardando início
             supabase.table("game_state_quiz").update({"current_question_index_quiz": -1, "is_active_quiz": False, "show_answer_quiz": False}).eq("id_quiz", 1).execute()
             st.sidebar.success(f"{len(dados_word)} questões carregadas!")
             st.rerun()
@@ -176,7 +175,7 @@ else:
         st.sidebar.markdown(f'<div class="contador-jogadores">JOGADORES ON-LINE: {len(players_data)}</div>', unsafe_allow_html=True)
         st.sidebar.divider()
 
-        # NAVEGAÇÃO: BOTÃO PRÓXIMA ALEATÓRIA (CRONÔMETRO AUTOMÁTICO)
+        # NAVEGAÇÃO: PRÓXIMA PERGUNTA (SORTEIO ALEATÓRIO REAL)
         t_padrao = st.sidebar.number_input("Tempo de Prova", value=15)
         
         if st.sidebar.button("🎲 PRÓXIMA PERGUNTA ALEATÓRIA", use_container_width=True):
@@ -192,10 +191,11 @@ else:
                     "start_time_quiz": int(time.time())
                 }).eq("id_quiz", 1).execute()
             else:
+                # Código -2 indica que todas as perguntas do pool acabaram
                 supabase.table("game_state_quiz").update({"current_question_index_quiz": -2}).eq("id_quiz", 1).execute()
             st.rerun()
 
-        # RESET: Interrompe o cronômetro da tela
+        # RESET: Interrompe a exibição do cronômetro
         if st.sidebar.button("🔄 RESET CRONÔMETRO", use_container_width=True):
             supabase.table("game_state_quiz").update({"is_active_quiz": False, "show_answer_quiz": False}).eq("id_quiz", 1).execute()
             st.rerun()
@@ -204,8 +204,15 @@ else:
             supabase.table("game_state_quiz").update({"show_answer_quiz": True, "is_active_quiz": False}).eq("id_quiz", 1).execute()
             st.rerun()
 
+        # BOTÃO REINICIAR: Repopula o pool e limpa o aviso de "Fim de Jogo"
+        if st.sidebar.button("♻️ REINICIAR QUIZ", use_container_width=True):
+            res_all = supabase.table("questions_quiz").select("id_quiz").execute()
+            st.session_state.pool_questoes = [q['id_quiz'] for q in res_all.data]
+            supabase.table("game_state_quiz").update({"current_question_index_quiz": -1, "is_active_quiz": False, "show_answer_quiz": False}).eq("id_quiz", 1).execute()
+            st.rerun()
+
     # --- 7. TELA DO JOGO (COM CRONÔMETRO MATEMÁTICO JS) ---
-    st.markdown('<h1 style="text-align:center; color:#333;">TESTE SEUS CONHECIMENTOS</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 style="text-align:center; color:#333;">QUIZ VISITA TÉCNICA - WLI</h1>', unsafe_allow_html=True)
     
     g_res = supabase.table("game_state_quiz").select("*").eq("id_quiz", 1).single().execute().data
     
@@ -213,11 +220,11 @@ else:
         st.balloons()
         st.success("🎉 TODAS AS PERGUNTAS FORAM RESPONDIDAS!")
     elif g_res['current_question_index_quiz'] != -1:
-        # CORREÇÃO: Busca sem .single() para evitar travar se o ID não existir no momento
+        # Busca a pergunta específica sorteada pelo Admin
         res_q_db = supabase.table("questions_quiz").select("*").eq("id_quiz", g_res['current_question_index_quiz']).execute()
         
         if res_q_db.data:
-            q_data = res_q_db.data[0]
+            q_data = res_q_db.data[0] # Pega o primeiro e único item da lista filtrada
             st.markdown(f'<div class="caixa-pergunta">{q_data["question_text_quiz"]}</div>', unsafe_allow_html=True)
             
             if g_res['is_active_quiz']:
@@ -249,4 +256,3 @@ else:
                 """, unsafe_allow_html=True)
     else:
         st.info("Aguardando o Administrador iniciar o Quiz.")
-
