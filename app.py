@@ -8,7 +8,7 @@ import time
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA (MANTIDA ORIGINAL) ---
-st.set_page_config(page_title="Quiz Técnico WLI", layout="wide")
+st.set_page_config(page_title="Jogo Quiz", layout="wide")
 
 # --- 2. CONEXÃO SUPABASE (USANDO SEUS SECRETS) ---
 url = st.secrets["URL_SUPABASE"]
@@ -96,7 +96,7 @@ if 'pool_questoes' not in st.session_state:
     st.session_state.pool_questoes = []
 
 if not st.session_state.auth['logged']:
-    st.title("🔑 Quiz Técnico WLI")
+    st.title("🔑 Quiz: Entre e Jogue!")
     u_nome = st.text_input("Apelido")
     u_pass = st.text_input("Senha", type="password")
     
@@ -212,7 +212,7 @@ else:
             st.rerun()
 
     # --- 7. TELA DO JOGO (COM CRONÔMETRO MATEMÁTICO JS) ---
-    st.markdown('<h1 style="text-align:center; color:#333;">QUIZ VISITA TÉCNICA - WLI</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 style="text-align:center; color:#333;">TESTE SEUS CONHECIMENTOS</h1>', unsafe_allow_html=True)
     
     g_res = supabase.table("game_state_quiz").select("*").eq("id_quiz", 1).single().execute().data
     
