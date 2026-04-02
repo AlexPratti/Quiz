@@ -176,7 +176,7 @@ else:
         st.sidebar.divider()
 
         # NAVEGAÇÃO: PRÓXIMA PERGUNTA (SORTEIO ALEATÓRIO REAL)
-        t_padrao = st.sidebar.number_input("Tempo de Prova", value=15)
+        t_padrao = st.sidebar.number_input("Tempo", value=15)
         
         if st.sidebar.button("🎲 PRÓXIMA PERGUNTA ALEATÓRIA", use_container_width=True):
             if st.session_state.pool_questoes:
