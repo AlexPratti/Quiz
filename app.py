@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 from docx import Document
 from supabase import create_client
 import random
@@ -14,58 +15,45 @@ url = st.secrets["URL_SUPABASE"]
 key = st.secrets["KEY_SUPABASE"]
 supabase = create_client(url, key)
 
-# Atualiza a cada 2 segundos para sincronizar Admin e Jogadores
-st_autorefresh(interval=2000, key="sync_quiz_wli")
+# Refresh de 2s para sincronizar os usuários com as ações do Admin
+st_autorefresh(interval=2000, key="refresh_sincronizado")
 
-# --- 3. FUNÇÃO DE LEITURA DO WORD (SEGURA CONTRA ERROS) ---
+# --- 3. FUNÇÃO DE LEITURA DO WORD (SIMPLIFICADA AO MÁXIMO) ---
 def parse_word_file(file):
-    doc = Document(file)
-    lista_de_texto = []
+    documento = Document(file)
+    texto_extraido = []
     
-    # Extrai o texto linha por linha
-    for p in doc.paragraphs:
-        texto_limpo = p.text.strip()
-        if texto_limpo != "":
-            lista_de_texto.append(texto_limpo)
+    for paragrafo in documento.paragraphs:
+        conteudo = paragrafo.text.strip()
+        if conteudo != "":
+            texto_extraido.append(conteudo)
     
-    qa_pairs = []
-    # Pula de 2 em 2: Pergunta (i) e Resposta (i+1)
-    for i in range(0, len(lista_de_texto), 2):
-        if i + 1 < len(lista_de_texto):
-            pergunta = lista_de_texto[i]
-            resposta = lista_de_texto[i+1]
-            dicionario = {
-                "question_text_quiz": pergunta,
-                "answer_text_quiz": resposta
+    lista_final = []
+    # Pega Pares: i = Pergunta, i+1 = Resposta
+    for i in range(0, len(texto_extraido), 2):
+        if (i + 1) < len(texto_extraido):
+            pergunta_txt = texto_extraido[i]
+            resposta_txt = texto_extraido[i+1]
+            bloco = {
+                "question_text_quiz": pergunta_txt,
+                "answer_text_quiz": resposta_txt
             }
-            qa_pairs.append(dicionario)
-    return qa_pairs
+            lista_final.append(bloco)
+    return lista_final
 
-# --- 4. ESTILO CSS (ALTA VISIBILIDADE) ---
+# --- 4. ESTILIZAÇÃO CSS ---
 st.markdown("""
     <style>
     .caixa-pergunta {
         background-color: #DDEBF7;
         padding: 40px;
-        border: 4px solid #4472C4;
+        border: 3px solid #4472C4;
         text-align: center;
-        font-size: 35px; /* Fonte Grande */
+        font-size: 32px;
         font-weight: bold;
-        color: #002060; /* AZUL ESCURO FORTE */
+        color: #002060; /* Azul Escuro */
         border-radius: 15px;
-        margin-bottom: 25px;
-    }
-    .display-cronometro {
-        background-color: #595959;
-        color: #FFFFFF;
-        padding: 15px;
-        font-size: 65px;
-        text-align: center;
-        font-weight: bold;
-        width: 200px;
-        margin: 20px auto;
-        border-radius: 10px;
-        border: 2px solid #000;
+        margin-bottom: 20px;
     }
     .alerta-mao {
         background-color: #C00000;
@@ -74,20 +62,20 @@ st.markdown("""
         text-align: center;
         font-size: 40px;
         font-weight: bold;
-        border: 6px solid #000;
+        border: 5px solid #000;
         border-radius: 20px;
         margin-top: 20px;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 5. LOGIN ---
+# --- 5. LÓGICA DE LOGIN ---
 if 'auth' not in st.session_state:
     st.session_state.auth = {'logged': False, 'role': None}
 
 if not st.session_state.auth['logged']:
-    st.title("Acesso ao Quiz")
-    u_nome = st.text_input("Seu Apelido")
+    st.title("🔑 Quiz Técnico WLI")
+    u_nome = st.text_input("Apelido")
     u_pass = st.text_input("Senha", type="password")
     if st.button("Entrar"):
         if u_pass == st.secrets["ADMIN_PASSWORD"]:
@@ -102,93 +90,94 @@ if not st.session_state.auth['logged']:
                 supabase.table("players_quiz").insert({"nickname_quiz": u_nome}).execute()
                 st.rerun()
             else:
-                st.error("Senha inválida.")
+                st.error("Senha incorreta!")
 
-# --- 6. PAINEL ADMINISTRADOR ---
+# --- 6. PAINEL ADMIN ---
 elif st.session_state.auth['role'] == 'admin':
     st.sidebar.title("ADMINISTRAÇÃO")
     state = supabase.table("game_state_quiz").select("*").eq("id_quiz", 1).single().execute().data
     st.sidebar.info(f"SENHA JOGADORES: {state['master_password_quiz']}")
     
-    file_word = st.sidebar.file_uploader("Subir Word (.docx)", type="docx")
-    if file_word and st.sidebar.button("Processar Word"):
-        perguntas_word = parse_word_file(file_word)
+    f_word = st.sidebar.file_uploader("Arquivo Word", type="docx")
+    if f_word and st.sidebar.button("Carregar Questões"):
+        dados_word = parse_word_file(f_word)
         supabase.table("questions_quiz").delete().neq("id_quiz", 0).execute()
-        supabase.table("questions_quiz").insert(perguntas_word).execute()
-        st.sidebar.success("Perguntas Atualizadas!")
+        supabase.table("questions_quiz").insert(dados_word).execute()
+        st.sidebar.success("OK!")
 
     st.sidebar.divider()
-    idx_vazio = state['current_question_index_quiz']
-    c1, c2 = st.sidebar.columns(2)
-    with c1:
+    idx = state['current_question_index_quiz']
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
         if st.button("⬅️ Anterior"):
-            supabase.table("game_state_quiz").update({"current_question_index_quiz": max(0, idx_vazio-1), "show_answer_quiz": False, "is_active_quiz": False}).eq("id_quiz", 1).execute()
+            supabase.table("game_state_quiz").update({"current_question_index_quiz": max(0, idx-1), "show_answer_quiz": False, "is_active_quiz": False}).eq("id_quiz", 1).execute()
             st.rerun()
-    with c2:
+    with col2:
         if st.button("Próxima ➡️"):
-            supabase.table("game_state_quiz").update({"current_question_index_quiz": idx_vazio+1, "show_answer_quiz": False, "is_active_quiz": False}).eq("id_quiz", 1).execute()
+            supabase.table("game_state_quiz").update({"current_question_index_quiz": idx+1, "show_answer_quiz": False, "is_active_quiz": False}).eq("id_quiz", 1).execute()
             st.rerun()
 
-    tempo_s = st.sidebar.number_input("Segundos", value=15)
+    t_set = st.sidebar.number_input("Tempo", value=15)
     if st.sidebar.button("🚀 START CRONÔMETRO", use_container_width=True):
         supabase.table("game_state_quiz").update({
-            "is_active_quiz": True, "timer_duration_quiz": tempo_s,
+            "is_active_quiz": True, "timer_duration_quiz": t_set,
             "show_answer_quiz": False, "start_time_quiz": int(time.time())
         }).eq("id_quiz", 1).execute()
 
     if st.sidebar.button("✅ VER RESPOSTA", use_container_width=True):
         supabase.table("game_state_quiz").update({"show_answer_quiz": True, "is_active_quiz": False}).eq("id_quiz", 1).execute()
 
-# --- 7. TELA DO JOGO (COM FÓRMULA MATEMÁTICA JS) ---
+# --- 7. TELA DO JOGO ---
 if st.session_state.auth['logged']:
-    st.markdown('<h1 style="text-align:center;">QUIZ VISITA TÉCNICA - WLI</h1>', unsafe_allow_html=True)
+    st.markdown('<h2 style="text-align:center;">QUIZ VISITA TÉCNICA - WLI</h2>', unsafe_allow_html=True)
     
-    res_game = supabase.table("game_state_quiz").select("*").eq("id_quiz", 1).single().execute().data
-    res_ques = supabase.table("questions_quiz").select("*").order("id_quiz").execute().data
+    g_res = supabase.table("game_state_quiz").select("*").eq("id_quiz", 1).single().execute().data
+    q_res = supabase.table("questions_quiz").select("*").order("id_quiz").execute().data
     
-    if res_ques and res_game['current_question_index_quiz'] < len(res_ques):
-        q = res_ques[res_game['current_question_index_quiz']]
-        st.markdown(f'<div class="caixa-pergunta">{q["question_text_quiz"]}</div>', unsafe_allow_html=True)
+    if q_res and g_res['current_question_index_quiz'] < len(q_res):
+        item = q_res[g_res['current_question_index_quiz']]
+        st.markdown(f'<div class="caixa-pergunta">{item["question_text_quiz"]}</div>', unsafe_allow_html=True)
         
-        # Cronômetro Matemático Injetado (Fórmula: Duração - (Agora - Início))
-        if res_game['is_active_quiz']:
-            t_duracao = res_game['timer_duration_quiz']
-            t_inicio = res_game['start_time_quiz']
+        # --- CRONÔMETRO COM HTML COMPONENT (RESOLVE O PROBLEMA DO JS) ---
+        if g_res['is_active_quiz']:
+            dur = g_res['timer_duration_quiz']
+            ini = g_res['start_time_quiz']
             
-            st.markdown(f"""
-                <div id="timer-box" class="display-cronometro">--</div>
-                <div id="hand-area"></div>
-                <script>
-                (function() {{
-                    var dur = {t_duracao};
-                    var start = {t_inicio};
-                    var display = document.getElementById('timer-box');
-                    var hand = document.getElementById('hand-area');
+            timer_html = f"""
+            <div id="timer-ui" style="
+                background-color: #595959; color: white; padding: 15px; 
+                font-size: 60px; text-align: center; font-family: sans-serif;
+                font-weight: bold; width: 180px; margin: 0 auto; border-radius: 10px;
+                border: 2px solid #000;">--</div>
+            <div id="mao-ui"></div>
 
-                    function tick() {{
-                        var agora = Math.floor(Date.now() / 1000);
-                        var resto = dur - (agora - start);
+            <script>
+                var duracao = {dur};
+                var inicio = {ini};
+                var display = document.getElementById('timer-ui');
+                var mao = document.getElementById('mao-ui');
 
-                        if (resto > 0) {{
-                            display.innerHTML = resto;
-                            hand.innerHTML = "";
-                        }} else {{
-                            display.innerHTML = "0";
-                            hand.innerHTML = '<div class="alerta-mao">✋ LEVANTE A MÃO E RESPONDA!</div>';
-                            clearInterval(itv);
-                        }}
+                function atualizar() {{
+                    var agora = Math.floor(Date.now() / 1000);
+                    var resto = duracao - (agora - inicio);
+
+                    if (resto > 0) {{
+                        display.innerHTML = resto;
+                        mao.innerHTML = "";
+                    }} else {{
+                        display.innerHTML = "0";
+                        display.style.backgroundColor = "#C00000";
+                        mao.innerHTML = '<div style="background-color: #C00000; color: white; padding: 25px; text-align: center; font-size: 35px; font-weight: bold; border: 5px solid #000; border-radius: 20px; margin-top: 20px; font-family: sans-serif;">✋ LEVANTE A MÃO E RESPONDA!</div>';
+                        clearInterval(loop);
                     }}
-                    var itv = setInterval(tick, 1000);
-                    tick();
-                }})();
-                </script>
-            """, unsafe_allow_html=True)
+                }}
+                var loop = setInterval(atualizar, 1000);
+                atualizar();
+            </script>
+            """
+            components.html(timer_html, height=250)
         
-        if res_game['show_answer_quiz']:
-            st.markdown(f"""
-                <div style="background-color: #D4EDDA; padding: 25px; border-radius: 10px; border: 2px solid #28A745; font-size: 28px; font-weight: bold; text-align: center; color: #155724;">
-                    RESPOSTA: {q['answer_text_quiz']}
-                </div>
-            """, unsafe_allow_html=True)
+        if g_res['show_answer_quiz']:
+            st.success(f"**RESPOSTA:** {item['answer_text_quiz']}")
     else:
-        st.info("Aguardando início...")
+        st.info("Aguardando ação do administrador...")
