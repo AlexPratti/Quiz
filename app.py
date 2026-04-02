@@ -10,9 +10,9 @@ from streamlit_autorefresh import st_autorefresh
 st.set_page_config(page_title="Quiz Técnico WLI", layout="wide")
 
 # --- 2. CONEXÃO COM O SUPABASE ---
-# Certifique-se de que os nomes no secrets.toml estão exatamente assim
-url = st.secrets["SUPABASE_URL"]
-key = st.secrets["SUPABASE_KEY"]
+# Ajustado para bater com o seu Secrets:
+url = st.secrets["URL_SUPABASE"]
+key = st.secrets["KEY_SUPABASE"]
 supabase = create_client(url, key)
 
 # Atualiza a tela automaticamente para sincronizar admin e jogadores
