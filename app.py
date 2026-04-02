@@ -197,7 +197,7 @@ else:
             supabase.table("game_state_quiz").update({"show_answer_quiz": True, "is_active_quiz": False}).eq("id_quiz", 1).execute()
 
     # --- 7. TELA PRINCIPAL DO JOGO ---
-    st.markdown('<h1 style="text-align:center; color:#333;">QUIZ VISITA TÉCNICA - WLI</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 style="text-align:center; color:#333;">QUIZ: TESTE SEUS CONHECIMENTOS</h1>', unsafe_allow_html=True)
     
     g_res = supabase.table("game_state_quiz").select("*").eq("id_quiz", 1).single().execute().data
     q_res = supabase.table("questions_quiz").select("*").order("id_quiz").execute().data
